@@ -1,0 +1,579 @@
+AUTOCARE SERVICE BOT - THE CODE EXPLAINED (PLAIN ENGLISH)
+==========================================================
+This guide explains what each part of app.py does, without needing any
+programming background. For how to demo the app, see ca4_ui_demo_guide.txt.
+
+HOW TO USE THE LINE NUMBERS
+---------------------------
+Each section below says where to find it in app.py ("lines 188-388") and shows
+a few short snippets of the real code, each with its line number. You do not
+need to understand the code to read the snippets. Each one is followed by an
+"In plain English" line. Open app.py in any text editor, jump to the line
+number, and you will see the same code.
+
+Note: if app.py is edited later, the line numbers will shift a little. The
+function names (for example extract_phone) stay the same, so you can always
+use your editor's Find (Ctrl+F) to locate them.
+
+
+QUICK MAP OF THE FILE
+---------------------
+  Section                                      Lines         Main contents
+  -------------------------------------------  ------------  ---------------------------
+  1. Business data                             17 - 133      SERVICES, LOCATIONS, REVIEWS
+  2. Intent detection                          135 - 186     keyword_intent, detect_intent
+  3. Entity extraction (picking out details)   188 - 388     extract_vehicle ... extract_phone
+  4. Conversation state (the bot's memory)     390 - 411     new_state, reset_state
+  5. Multi-step flows                          413 - 598     booking, availability, cancel
+  6. One-step answers                          600 - 697     greeting, services, reviews
+  7. Router (traffic controller)               699 - 828     route_message
+  8. Helpers for the screen                    830 - 954     filter_catalogue, banner
+  9. Screen (Streamlit UI)                     956 - 1174    tabs, sidebar, form
+
+
+THE BIG PICTURE
+---------------
+app.py is a small website for a made-up car and bike service business called
+AutoCare. Customers can:
+
+  - chat with a bot to ask questions, book a service, or cancel a booking
+  - browse the service catalogue (like a price list you can search and sort)
+  - book through a form
+  - read customer reviews, with each one labelled Positive, Negative or Neutral
+
+It is built with a tool called Streamlit, which turns Python code into a web
+page. Python is the programming language used.
+
+An important point: the bot is NOT artificial intelligence. It is "rule-based".
+It follows fixed rules written by the programmer, such as "if the message
+contains the word 'cancel', the customer wants to cancel". Think of a
+receptionist working from a checklist rather than someone who truly
+understands language. This makes the bot predictable and easy to explain,
+but it can only handle what the rules cover.
+
+The file is organised in 9 numbered sections. Sections 1 to 8 are the
+"brain" (the logic). Section 9 is the "face" (what the user sees on screen).
+
+
+SECTION 1 - THE BUSINESS DATA                              (lines 17 - 133)
+----------------------------------------------------------------------------
+What it is: the facts about the business, stored in simple lists. It works
+like the business's price list and notice board.
+
+  - SERVICES (line 25): the 7 services offered (general service, oil change,
+    car wash, brake repair, AC service, tyre replacement, battery check). Each
+    one has a description, a price in rupees, how long it takes, and which
+    vehicles it suits. For example, AC service is not offered for bikes.
+  - LOCATIONS (line 57): the 5 branches (Whitefield, Koramangala, HSR Layout,
+    MG Road, Indiranagar).
+  - TIME_SLOTS / TIME_SLOT_OPTIONS (lines 73-75): Morning (9 AM - 12 PM),
+    Afternoon (12 PM - 4 PM), Evening (4 PM - 7 PM). Branches are open 9 AM to
+    7 PM, Monday to Saturday.
+  - REVIEWS (line 80): 18 sample customer reviews. They are made up for the
+    demo, not real data.
+  - POSITIVE_WORDS / NEGATIVE_WORDS (lines 101 and 108): word lists used later
+    to judge reviews.
+  - INTENT_KEYWORDS (line 115): the trigger words the bot listens for.
+  - YES_WORDS / NO_WORDS (lines 130-131): words that count as yes or no.
+
+Snippet - one service in the price list (lines 30-33 are oil change):
+
+    "oil change": {
+        "desc": "Engine oil and oil filter replacement.",
+        "price": 800, "duration_mins": 30, "vehicles": ALL_VEHICLE_TYPES,
+    },
+
+In plain English: each service is a small record with a description, a price
+(Rs. 800), a duration (30 minutes) and the vehicles it suits. It is like one
+row in a price table.
+
+Snippet - the trigger words (lines 119-121):
+
+    "GREETING": ["hi", "hello", "hey", "good morning", "good afternoon"],
+    "CANCELLATION": ["cancel", "reschedule"],
+    "GOODBYE": ["bye", "goodbye", "exit", "quit", "thank you", "that's all"],
+
+In plain English: if a message contains "cancel" or "reschedule", the bot
+treats it as a cancellation request. The order of this list matters: the
+code checks from the top and stops at the first match.
+
+Why this section matters: if the business changes a price or adds a branch,
+this is the one place to edit. Everything else in the app reads from here.
+
+
+SECTION 2 - UNDERSTANDING WHAT THE CUSTOMER WANTS         (lines 135 - 186)
+----------------------------------------------------------------------------
+What it is: reading a customer's message and deciding what they are trying to
+do. In chatbot language this goal is called the "intent".
+
+Key functions: keyword_intent (line 138), detect_intent (line 148),
+is_affirmative (line 177) and is_negative (line 182).
+
+How it works: the code scans the message for the keywords from Section 1.
+"Can I book a service?" contains "book", so the intent is APPOINTMENT.
+"What do people say about you?" contains the phrase "what do people say", so
+the intent is REVIEWS. If nothing matches, the intent is UNKNOWN and the bot
+asks the customer to rephrase.
+
+Snippet - the core matching loop (lines 140-145):
+
+    text = user_text.lower()
+    for intent, keywords in INTENT_KEYWORDS.items():
+        for kw in keywords:
+            if re.search(r"\b" + re.escape(kw) + r"\b", text):
+                return intent
+    return None
+
+In plain English: make the message lowercase, then go through each intent
+and each of its keywords. The first keyword found as a whole word decides the
+intent. Matching whole words stops "hi" from being wrongly found inside
+"anything". If nothing matches, the answer is "none".
+
+
+SECTION 3 - PICKING OUT THE DETAILS (ENTITY EXTRACTION)   (lines 188 - 388)
+----------------------------------------------------------------------------
+What it is: once the bot knows what the customer wants, it pulls out the
+specific details in the message. These details are called "entities". Think
+of it as filling in the boxes on a booking form from what the customer typed.
+
+The code has a small "finder" for each detail:
+
+  - extract_vehicle (line 191): car, bike, SUV...
+  - extract_service_type (line 199): oil change, brake repair...
+  - extract_location (line 207): Whitefield, MG Road...
+  - extract_date (line 215): today, tomorrow, Monday, or 12/10
+  - extract_appointment_time (line 230): morning, afternoon, evening, or a
+    time like "3 pm", matched to the right time slot
+  - extract_name (line 265): "Sam Kumar" or "my name is Sam"
+  - extract_phone (line 294): must be exactly 10 digits
+  - is_sunday (line 303): branches are closed on Sundays
+  - extract_price_constraint (line 327) and price_matches (line 342): "under
+    500", "between 500 and 1000"
+  - search_services (line 358): loose search across service names and
+    descriptions
+  - analyze_sentiment (line 377): the review scorer, explained further below
+
+Snippet - finding the vehicle (lines 191-196):
+
+    def extract_vehicle(text):
+        text = text.lower()
+        for kw in VEHICLE_KEYWORDS:
+            if kw in text:
+                return kw
+        return None
+
+In plain English: go through the list of known vehicle words. If the message
+contains one, return it. Otherwise return nothing.
+
+Snippet - checking the phone number (lines 297-300):
+
+    digits = re.sub(r"\D", "", text)
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    return digits if len(digits) == 10 else None
+
+In plain English: throw away everything that is not a digit (spaces, dashes,
+the + sign). If a "91" country code is on the front, drop it. If exactly 10
+digits remain, accept it as the phone number. Otherwise reject it.
+
+
+SECTION 4 - THE BOT'S MEMORY (CONVERSATION STATE)         (lines 390 - 411)
+----------------------------------------------------------------------------
+What it is: a notepad the bot keeps during a chat. Without it, the bot would
+forget everything after each message.
+
+Example: when a customer says "I have a bike", the bot writes "vehicle = bike"
+on the notepad. Later, when they say "battery check", it adds "service =
+battery check". It always knows which question to ask next because it can see
+what is already filled in and what is still missing.
+
+Snippet - a fresh, empty notepad (lines 396-402):
+
+    def new_state():
+        return {
+            "active_flow": None,
+            "slots": {},
+            "pending_confirm": None,
+            "pending_data": {},
+        }
+
+In plain English: the notepad has four spaces. "active_flow" is which
+multi-step conversation is running (booking, availability, cancellation, or
+none). "slots" holds the details collected so far. "pending_confirm" and
+"pending_data" remember a yes/no question the bot has just asked.
+
+"Reset" (reset_state, line 405) simply wipes the notepad clean. This happens
+after a booking is finished or when the customer changes topic.
+
+
+SECTION 5 - THE MULTI-STEP CONVERSATIONS (FLOWS)          (lines 413 - 598)
+----------------------------------------------------------------------------
+What it is: some tasks need several questions and answers. These are called
+"flows". There are three.
+
+  1. BOOKING (handle_appointment_flow, line 416). The bot asks, in order:
+     vehicle, service, date, time slot, branch, name, phone number. It then
+     shows a confirmation summary and saves the booking. If the customer gives
+     several details at once ("tomorrow morning"), the bot accepts them
+     together and skips ahead. It refuses Sundays, times outside opening hours,
+     and phone numbers that are not 10 digits, then asks again.
+
+  2. AVAILABILITY (handle_availability_flow, line 508). The bot asks which
+     date, then says which slots are open. It then offers to start a booking
+     and carries the chosen date over so the customer does not have to repeat
+     it.
+
+  3. CANCELLATION (handle_cancellation_flow, line 567). The bot looks at the
+     customer's real bookings, asks which one (by booking number or date),
+     shows it, and asks "yes or no?" before cancelling. The booking is then
+     removed from the My Bookings list and the sidebar count goes down. If
+     there are no bookings, it says so. Helper functions: extract_booking_ref
+     (line 526), booking_matches_date (line 537) and describe_booking
+     (line 562).
+
+Snippet - the booking flow's pattern: check what is missing, ask for it
+(lines 423-429):
+
+    if "vehicle" not in slots:
+        vehicle = extract_vehicle(user_text)
+        if vehicle:
+            slots["vehicle"] = vehicle
+            filled_now = True
+        else:
+            return "Sure, let's book your service. First, what vehicle do you have (car/bike/model)?"
+
+In plain English: if the notepad has no vehicle yet, try to find one in the
+customer's message. If found, write it on the notepad. If not, ask the
+question and stop. The code repeats this same pattern for service, date, time
+slot, branch, name and phone, one after another (lines 431-495).
+
+Snippet - the Sunday rule in chat (lines 446-447):
+
+    if date and is_sunday(date):
+        return "Our branches are closed on Sundays. Please pick another date."
+
+In plain English: if the date the customer gave is a Sunday, refuse it and ask
+again instead of writing it on the notepad.
+
+Snippet - finishing the booking (lines 501-505):
+
+    booking = dict(slots)
+    reset_state(state)
+    state["pending_confirm"] = "ANYTHING_ELSE"
+    state["completed_booking"] = booking   # the UI picks this up and lists it under My Bookings
+    return summary
+
+In plain English: copy the finished booking, wipe the notepad, ask "anything
+else?", and hand the finished booking over so Section 9 can add it to the
+My Bookings list.
+
+Snippet - asking before cancelling (lines 585-589):
+
+    if len(matches) == 1:
+        reset_state(state)
+        state["pending_confirm"] = "CANCEL_BOOKING"
+        state["pending_data"] = {"id": matches[0]["id"]}
+        return f"Found {describe_booking(matches[0])}. Cancel it? (yes/no)"
+
+In plain English: once exactly one booking matches what the customer said,
+show it and ask yes or no. The booking number is remembered on the notepad
+while waiting for the answer.
+
+The yes/no confirmation before cancelling is a safety step, like a shop
+asking "are you sure you want to delete this order?"
+
+
+SECTION 6 - THE ONE-STEP ANSWERS                          (lines 600 - 697)
+----------------------------------------------------------------------------
+What it is: replies that need no follow-up questions.
+
+  - handle_greeting (line 603): "Hello! Welcome to AutoCare..."
+  - handle_service_type (line 615): lists services, or filters them
+    ("services under 500", "what do you do for tyres")
+  - handle_location (line 652): branch locations and opening hours
+  - handle_reviews (line 660): shows reviews and counts how many are positive
+    and negative
+  - handle_goodbye (line 688)
+  - handle_unknown (line 692): the fallback "I didn't understand" reply when no
+    rule matches
+
+Snippet - filtering reviews by what the customer mentioned (lines 661-668):
+
+    service = extract_service_type(user_text)
+    location = extract_location(user_text)
+
+    filtered = REVIEWS
+    if service:
+        filtered = [r for r in filtered if r["service"] == service]
+    if location:
+        filtered = [r for r in filtered if r["location"] == location]
+
+In plain English: start with all reviews. If the customer named a service,
+keep only reviews for it. If they named a branch, keep only reviews for that
+branch.
+
+
+SECTION 7 - THE ROUTER (THE TRAFFIC CONTROLLER)           (lines 699 - 828)
+----------------------------------------------------------------------------
+What it is: the part that decides which section above should answer each
+message. Think of a receptionist who hears the customer and directs them to
+the right desk.
+
+Key functions: route_message (line 753), chatbot_response (line 739),
+wants_to_leave_flow (line 713) and FLOW_SLOTS (line 703).
+
+Its main jobs:
+
+  - If a multi-step flow is already running (for example, mid-booking), the
+    next message goes back to that flow.
+  - If the bot just asked a yes/no question, it checks for yes or no.
+  - Otherwise it uses Section 2 to find the intent and sends the message to
+    the matching answer.
+  - If the customer changes the subject in the middle of a booking, for
+    example by asking for reviews, the bot answers the new question instead
+    of stubbornly repeating its booking question. It adds a note that the
+    booking is on hold.
+
+Snippet - continuing a flow that is already running (lines 757-760):
+
+    if state["active_flow"] == "APPOINTMENT":
+        return handle_appointment_flow(user_text, state)
+    if state["active_flow"] == "AVAILABILITY":
+        return handle_availability_flow(user_text, state)
+
+In plain English: if a booking is in progress, hand the new message straight
+back to the booking flow.
+
+Snippet - choosing who answers a fresh message (lines 804-812):
+
+    intent = detect_intent(user_text)
+
+    if intent == "GREETING":
+        return handle_greeting()
+    elif intent == "SERVICE_TYPE":
+        return handle_service_type(user_text)
+    elif intent == "APPOINTMENT":
+        state["active_flow"] = "APPOINTMENT"
+        return handle_appointment_flow(user_text, state)
+
+In plain English: work out the intent, then send the message to the matching
+answer. A booking request also marks the booking flow as "running".
+
+Snippet - letting the customer change the subject (lines 743-746):
+
+    if state["active_flow"] and wants_to_leave_flow(user_text, state):
+        if state["active_flow"] == "APPOINTMENT" and state["slots"]:
+            note = "\n\n(Your booking is on hold. Say \"book a service\" to start it again.)"
+        reset_state(state)
+
+In plain English: if a flow is running but the new message is clearly about
+something else, stop the flow and answer the new question. If it was a
+booking, add a note that it was put on hold.
+
+
+SECTION 8 - HELPERS FOR THE SCREEN                        (lines 830 - 954)
+----------------------------------------------------------------------------
+What it is: small tools used by the tabs on the website. The tabs and the
+chatbot always agree with each other because they use the same data.
+
+  - SERVICE_ICONS (line 835): an emoji for each service
+  - SENTIMENT_COLORS (line 841): green / red / grey for Positive / Negative /
+    Neutral
+  - QUICK_QUESTIONS (line 845): the 6 shortcut buttons in the sidebar
+  - filter_catalogue (line 855): the logic behind the search box, vehicle
+    dropdown, price slider and sort menu in the Service Catalogue tab
+  - filter_reviews (line 879): narrows reviews by service and branch
+  - explain_sentiment (line 891): shows exactly which words made a review
+    Positive or Negative
+  - banner_svg (line 899) and steps_svg (line 932): the banner and "how it
+    works" pictures, drawn by code, so no image files are needed. This is why
+    app.py is the only file required.
+
+Snippet - filtering the catalogue (lines 859-867):
+
+    for name in names:
+        info = SERVICES[name]
+        if vehicle != "Any" and vehicle not in info["vehicles"]:
+            continue
+        if not (price_range[0] <= info["price"] <= price_range[1]):
+            continue
+        results.append((name, info))
+
+In plain English: go through each service. Skip it if it does not suit the
+chosen vehicle, or if its price is outside the chosen range. Keep the rest.
+(The word "continue" means "skip this one and move to the next".)
+
+
+SECTION 9 - THE SCREEN ITSELF (STREAMLIT UI)             (lines 956 - 1174)
+----------------------------------------------------------------------------
+What it is: the part that actually draws the website and responds to clicks.
+Everything above is behind the scenes; this section is what the customer sees.
+
+  - SESSION MEMORY (lines 961-973): remembers the chat history, the list of
+    bookings and the current conversation while the browser tab stays open.
+    There is no database, so bookings are lost if the page is refreshed or
+    closed. That is fine for a demo but a real business would need a database.
+  - BOOKING HELPERS (lines 976-1004): add_booking, process_message and
+    reset_conversation (explained below).
+  - BANNER AND SIDEBAR (lines 1006-1026): the header picture, quick-question
+    buttons, branch list, the "My bookings" count and a New Conversation
+    button.
+  - TAB 1 - CHAT (lines 1032-1044): the chat window.
+  - TAB 2 - SERVICE CATALOGUE (lines 1046-1065): a searchable, sortable price
+    list shown as cards.
+  - TAB 3 - BOOK NOW (lines 1067-1128): the booking form (name, phone, vehicle,
+    service, date, time slot, branch) with validation messages for mistakes.
+    On the right is the My Bookings list, each with a Cancel button.
+  - TAB 4 - CUSTOMER REVIEWS (lines 1130-1171): filters, summary numbers, a bar
+    chart of sentiment, the review cards, and a box where you can type your
+    own review to see how it is scored.
+  - SIDEBAR COUNT (line 1174): the "My bookings" number, filled in last so it
+    is always up to date.
+
+Snippet - the bookings list that the whole app shares (lines 966-967):
+
+    if "bookings" not in st.session_state:
+        st.session_state.bookings = []
+
+In plain English: the first time the page loads, create an empty list of
+bookings. Both the chat and the form add to this one list.
+
+Snippet - what a saved booking looks like (lines 976-982):
+
+    def add_booking(vehicle, service, date, branch, name="-", phone="-", time="-", source="Form"):
+        st.session_state.bookings.append({
+            "id": st.session_state.next_booking_id,
+            "name": name, "phone": phone, "vehicle": vehicle, "service": service,
+            "date": date, "time": time, "branch": branch, "source": source,
+        })
+        st.session_state.next_booking_id += 1
+
+In plain English: a booking is a record with a number, the customer's name and
+phone, the vehicle, service, date, time slot, branch, and whether it came from
+the chat or the form. It is added to the list, and the next booking number goes
+up by one. Chat and form bookings use this same function, which is why they
+look identical and appear together.
+
+Snippet - connecting the chat to the bookings list (lines 989-998):
+
+    st.session_state.conversation_state["bookings"] = st.session_state.bookings   # so chat can see/cancel them
+    response = chatbot_response(text, st.session_state.conversation_state)
+    ...
+    cancelled = st.session_state.conversation_state.pop("cancelled_ids", [])
+    if cancelled:
+        st.session_state.bookings = [b for b in st.session_state.bookings if b["id"] not in cancelled]
+    done = st.session_state.conversation_state.pop("completed_booking", None)
+    if done:
+        add_booking(done["vehicle"], done["service"], done["date"], done["location"],
+                    name=done["name"], phone=done["phone"], time=done["time"], source="Chat")
+
+In plain English: before the bot answers, show it the current list of
+bookings so it can find the one to cancel. After it answers, check two things.
+If the bot says a booking was cancelled, remove it from the list. If the bot
+says a booking was completed, add it to the list. This is how chat actions
+show up in the Book Now tab and the sidebar count.
+
+Snippet - the form's checks before saving (lines 1097-1102):
+
+    if not name.strip():
+        errors.append("Please enter your name.")
+    if not re.fullmatch(r"\d{10}", phone.strip()):
+        errors.append("Phone number must be exactly 10 digits.")
+    if date.weekday() == 6:
+        errors.append("Branches are closed on Sundays. Please pick another date.")
+
+In plain English: collect any mistakes (empty name, phone not 10 digits,
+Sunday date). If there are none, save the booking. If there are, show them in
+red. The chat applies the same rules in Section 5.
+
+Snippet - the Cancel button in My Bookings (lines 1126-1128):
+
+    if st.button("Cancel booking", key=f"cancel_{b['id']}"):
+        st.session_state.bookings = [x for x in st.session_state.bookings if x["id"] != b["id"]]
+        st.rerun()
+
+In plain English: when the button is clicked, rebuild the bookings list
+without that booking, then redraw the page. The sidebar count follows
+automatically.
+
+Snippet - the sidebar count (line 1174):
+
+    bookings_slot.metric("My bookings", len(st.session_state.bookings))
+
+In plain English: show how many bookings are currently on the list.
+
+
+REVIEWS AND SENTIMENT (HOW A REVIEW GETS ITS LABEL)
+---------------------------------------------------
+Where: analyze_sentiment (lines 377-386), with the word lists in Section 1
+(lines 101-113) and explain_sentiment (lines 891-896).
+
+The app uses a simple "word counting" method:
+
+  1. Split the review into words.
+  2. Count how many are on the positive list (great, friendly, quick...).
+  3. Count how many are on the negative list (slow, rude, expensive...).
+  4. More positive words = Positive. More negative words = Negative.
+     Equal counts = Neutral.
+
+Snippet (lines 379-386):
+
+    words = re.findall(r"[a-z']+", text.lower())
+    pos = sum(1 for w in words if w in POSITIVE_WORDS)
+    neg = sum(1 for w in words if w in NEGATIVE_WORDS)
+    if pos > neg:
+        return "Positive"
+    elif neg > pos:
+        return "Negative"
+    return "Neutral"
+
+In plain English: split the text into lowercase words, count the positive
+ones and the negative ones, and compare the two counts.
+
+Example: "Quick service and friendly staff, great value" has positive words
+(quick, friendly, great, value) and no negative ones, so it is Positive.
+
+Limitation worth knowing: this method does not understand context. A review
+saying "not good" would still count "good" as positive. Real sentiment tools
+use more advanced techniques, but this method is transparent, since the
+screen can show exactly which words caused the label.
+
+
+A BOOKING FROM START TO FINISH
+------------------------------
+To see how the sections work together, follow one chat booking:
+
+  Customer types: "I want to book a service"
+    Section 2 (keyword_intent, line 138) spots "book" and sets the intent to
+    APPOINTMENT.
+    Section 7 (route_message, line 753) starts the booking flow.
+    Section 5 (handle_appointment_flow, line 416) runs the booking.
+    Section 4 (the notepad) records that the booking has begun.
+    Bot asks: "What vehicle do you have?"
+
+  Customer types: "bike"
+    Section 3 (extract_vehicle, line 191) finds the vehicle. Section 4 stores
+    it. Bot asks for the service.
+
+  ...the same pattern repeats for service, date, time slot, branch, name and
+  phone number...
+
+  After the phone number:
+    Section 5 (lines 497-505) builds the confirmation message.
+    Section 9 (process_message, line 985) adds the booking to My Bookings and
+    updates the sidebar count.
+    Section 4 (reset_state, line 405) wipes the notepad ready for the next
+    conversation.
+
+
+WORDS YOU MAY HEAR
+------------------
+  Rule-based:   follows fixed if-this-then-that rules; does not learn.
+  Intent:       what the customer is trying to do (book, cancel, ask...).
+  Entity:       a specific detail in a message (a date, a branch, a name).
+  Flow:         a conversation that takes several steps.
+  State:        the bot's memory of the conversation so far.
+  Sentiment:    whether a piece of text is positive, negative or neutral.
+  Validation:   checking that input is acceptable (for example, a phone
+                number has exactly 10 digits).
+  UI:           user interface; the screen the customer interacts with.

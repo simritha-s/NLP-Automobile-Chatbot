@@ -1,0 +1,87 @@
+AUTOCARE SERVICE BOT - TABBED UI DEMO GUIDE (CA4)
+==================================================
+Run:  pip install streamlit pandas
+      python -m streamlit run app.py
+
+Everything (banner, "how it works" graphic, icons) is drawn in code, so
+app.py is the only file you need.
+
+
+HEADER + SIDEBAR
+----------------
+- Banner image at the top (SVG drawn in code).
+- Sidebar: 6 quick-question buttons, branch list, "My bookings" count,
+  and a New Conversation button.
+- Click "Services under 500" -> the answer appears in the Chat tab.
+- The "My bookings" count updates whenever a booking is made or cancelled,
+  from the chat or from the Book Now tab.
+
+
+TAB 1 - CHAT  (intents, entities, multi-turn, context)
+------------------------------------------------------
+- Open "How it works" for the 3-step graphic.
+
+Booking in chat
+  The bot collects the same details as the Book Now form, in this order:
+  vehicle, service, date, time slot, branch, name, phone number.
+- Try: I want to book a service -> I have a Royal Enfield bike ->
+       battery check -> monday -> morning -> mg road -> Sam Kumar ->
+       9876543210
+  The booking appears under "My bookings" in the Book Now tab, with the
+  name, phone number and time slot filled in (marked "booked via Chat").
+- Try: what time do you open -> monday -> yes -> car -> car wash ->
+       afternoon -> koramangala -> Priya -> 9123456780
+  (the date from the availability check is carried into the booking)
+- Shortcuts: "tomorrow morning" answers the date and time slot together.
+  A clock time such as "3:30 pm" also works and is matched to a slot.
+  Names can be typed plainly ("Sam") or as "my name is Sam".
+  A phone number may include spaces, dashes or +91.
+- Validation (same rules as the form): the time must fall between 9 AM and
+  7 PM, the phone number must be exactly 10 digits, and branches are
+  closed on Sundays. Try "sunday", "8 pm" or "12345" to see the bot ask again.
+
+Cancelling in chat
+- Try: cancel my booking -> 1 -> yes
+  The bot lists your bookings and asks which one (by number, or by date such
+  as "cancel monday" or "cancel booking 2"). It then asks yes/no before
+  cancelling. The booking disappears from "My bookings" and the sidebar
+  count goes down.
+- With no bookings it replies "You don't have any bookings to cancel."
+
+Interrupting a booking
+- In the middle of a booking, click any sidebar question (or type something
+  like "reviews for oil change"). The bot answers the new question instead of
+  repeating the booking question. Typed interruptions add a note that the
+  booking is on hold; say "book a service" to start again.
+
+
+TAB 2 - SERVICE CATALOGUE  (product catalogue, search, info, filtering)
+-----------------------------------------------------------------------
+- Search box: wash, tyre, battery
+- Vehicle dropdown: choose bike -> AC Service disappears
+- Price slider: 0-500 shows the cheapest services
+- Sort dropdown: price or duration
+- A search with no matches shows a warning
+
+
+TAB 3 - BOOK NOW  (input boxes and validation)
+----------------------------------------------
+- Name, 10-digit phone, vehicle, service, date picker, time slot, branch.
+- The Service list only offers services that suit the chosen vehicle.
+- Try an empty name, a short phone number, or a Sunday date to see the
+  validation messages.
+- A valid booking shows a confirmation, clears the form, and is listed under
+  "My bookings" with a Cancel button.
+- Bookings made in the Chat tab are listed here too. Cancelling from either
+  place (this button or the chat) removes the booking and updates the
+  sidebar count.
+
+
+TAB 4 - CUSTOMER REVIEWS  (review analysis + sentiment)
+-------------------------------------------------------
+- Filter by service and branch.
+- Metrics + bar chart show Positive / Negative / Neutral counts.
+- Each review carries a colour-coded sentiment label.
+- "Try the sentiment analyzer": type your own review, e.g.
+    Quick service and friendly staff, great value.
+  It shows the label and exactly which positive/negative words were matched.
